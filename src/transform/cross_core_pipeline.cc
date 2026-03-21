@@ -64,7 +64,7 @@ public:
 
   std::vector<PipelineInfo> DetectCrossCorePipelines(const Stmt& stmt) {
     pipeline_infos_.clear();
-    current_pipeline_info_ = nullptr;
+    current_pipeline_index_ = -1;
     this->VisitStmt(stmt);
     std::vector<PipelineInfo> cross_core_pipelines;
     for (const auto& info : pipeline_infos_) {
@@ -78,7 +78,7 @@ public:
   void VisitStmt_(const ForNode* loop) override {
     auto num_stages_anno = loop->annotations.Get("num_stages");
     if (num_stages_anno.defined()) {
-        PipelineInfo* prev_pipeline = current_pipeline_info_;
+        int32_t prev_index = current_pipeline_index_;
 
         PipelineInfo new_info;
         new_info.for_node = loop;
@@ -86,21 +86,18 @@ public:
         new_info.scene = INVALID_SCOPE;
         new_info.loop_var_name = loop->loop_var->name_hint;
 
-        current_pipeline_info_ = &new_info;
         pipeline_infos_.push_back(new_info);
+        current_pipeline_index_ = static_cast<int32_t>(pipeline_infos_.size()) - 1;
         this->VisitStmt(loop->body);
 
-        if (!pipeline_infos_.empty()) {
-            pipeline_infos_.back() = new_info;
-        }
-        current_pipeline_info_ = prev_pipeline;
+        current_pipeline_index_ = prev_index;
     } else {
         this->VisitStmt(loop->body);
     }
   }
 
   void VisitStmt_(const EvaluateNode* op) override {
-    if (!current_pipeline_info_) {
+    if (current_pipeline_index_ < 0) {
       return;
     }
 
@@ -116,10 +113,11 @@ public:
         }
     }
     if (scope != INVALID_SCOPE) {
-        if (current_pipeline_info_->scene == INVALID_SCOPE) {
-            current_pipeline_info_->scene = scope;
-        } else if (current_pipeline_info_->scene != scope) {
-            current_pipeline_info_->is_cross_core = true;
+        auto& info = pipeline_infos_[current_pipeline_index_];
+        if (info.scene == INVALID_SCOPE) {
+            info.scene = scope;
+        } else if (info.scene != scope) {
+            info.is_cross_core = true;
         }
     }
   }
@@ -127,7 +125,7 @@ public:
 private:
     std::vector<PipelineInfo> pipeline_infos_;
     Map<Var, String> location_map_;
-    PipelineInfo* current_pipeline_info_{nullptr};
+    int32_t current_pipeline_index_{-1};
 };
 
 class BufferMapTransformer {
